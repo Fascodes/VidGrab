@@ -1,4 +1,2 @@
 *.cfg
-Include
-Lib
-Scripts
+.venv
