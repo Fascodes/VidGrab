@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,10 +17,16 @@ type Downloader struct {
 	OutDir     string
 }
 
-func (d *Downloader) Download(ctx context.Context, info *VideoInfo) (string, error) {
+func (d *Downloader) Download(ctx context.Context, info *VideoInfo, onProgress func(string)) (string, error) {
 	if err := os.MkdirAll(d.OutDir, 0o755); err != nil {
 		return "", fmt.Errorf("create out dir: %w", err)
 	}
+
+	tmpDir, err := os.MkdirTemp(d.OutDir, "job-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
 
 	selector := "b"
 	video, okV := bestVideo(info.Formats)
@@ -29,12 +36,11 @@ func (d *Downloader) Download(ctx context.Context, info *VideoInfo) (string, err
 	}
 
 	base := fmt.Sprintf("%s_%s", info.Extractor, info.ID)
-	outPath := filepath.Join(d.OutDir, base+".mp4")
 
 	args := []string{
 		"-f", selector,
 		"--merge-output-format", "mp4",
-		"-o", filepath.Join(d.OutDir, base+".%(ext)s"),
+		"-o", filepath.Join(tmpDir, base+".%(ext)s"),
 		"--newline",
 		"--progress-template", "download:PROGRESS %(progress._percent_str)s %(progress._speed_str)s",
 	}
@@ -62,17 +68,22 @@ func (d *Downloader) Download(ctx context.Context, info *VideoInfo) (string, err
 	for scanner.Scan() {
 		line := scanner.Text()
 		if p, ok := strings.CutPrefix(line, "PROGRESS "); ok {
-			fmt.Printf("\r  %s   ", strings.TrimSpace(p))
+			if onProgress != nil {
+				onProgress(strings.TrimSpace(p))
+			}
 		} else {
-			fmt.Println("\n" + line)
+			log.Println("[yt-dlp]", line)
 		}
 	}
-
 	if err := cmd.Wait(); err != nil {
 		return "", fmt.Errorf("yt-dlp: %w", err)
 	}
-	if _, err := os.Stat(outPath); err != nil {
-		return "", fmt.Errorf("expected output missing: %w", err)
+
+	tmpOut := filepath.Join(tmpDir, base+".mp4")
+	finalOut := filepath.Join(d.OutDir, base+".mp4")
+
+	if err := os.Rename(tmpOut, finalOut); err != nil {
+		return "", fmt.Errorf("move result: %w", err)
 	}
-	return outPath, nil
+	return finalOut, nil
 }

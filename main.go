@@ -2,37 +2,39 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"time"
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("usage: go run . <url>")
-		os.Exit(1)
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	info, err := fetchInfo(os.Args[1])
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
-	}
-	fmt.Printf("%s [%s]\n", info.Title, info.Extractor)
-
-	ytdlpPath := os.Getenv("YTDLP_PATH") // This dictates which ytdlp is used, default is env variable, fallback is hardcoded .venv path
+	ytdlpPath := os.Getenv("YTDLP_PATH")
 	if ytdlpPath == "" {
 		ytdlpPath = defaultYtdlpPath
 	}
-	d := &Downloader{YtdlpPath: ytdlpPath, OutDir: "downloads"}
 
-	path, err := d.Download(ctx, info)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "\nerror:", err)
-		os.Exit(1)
+	srv := &Server{
+		ctx:   ctx,
+		store: NewJobStore(),
+		dl:    &Downloader{YtdlpPath: ytdlpPath, OutDir: "downloads"},
 	}
-	fmt.Println("\nzapisano:", path)
+	httpSrv := &http.Server{Addr: "127.0.0.1:8080", Handler: srv.routes()}
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		httpSrv.Shutdown(shutdownCtx)
+	}()
+
+	log.Println("listening on %w", httpSrv.Addr)
+	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
 }

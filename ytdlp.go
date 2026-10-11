@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,8 +30,8 @@ type VideoInfo struct {
 
 const defaultYtdlpPath string = "./.venv/Scripts/yt-dlp.exe"
 
-func fetchInfo(url string) (*VideoInfo, error) {
-	out, err := ytdlp("-J", "--no-warnings", url).Output()
+func fetchInfo(ctx context.Context, url string) (*VideoInfo, error) {
+	out, err := ytdlp(ctx, "-J", "--no-warnings", url).Output()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -46,12 +47,12 @@ func fetchInfo(url string) (*VideoInfo, error) {
 	return &info, nil
 }
 
-func ytdlp(args ...string) *exec.Cmd {
+func ytdlp(ctx context.Context, args ...string) *exec.Cmd {
 	bin := defaultYtdlpPath
 	if bin == "" {
 		bin = "yt-dlp"
 	}
-	return exec.Command(bin, args...)
+	return exec.CommandContext(ctx, bin, args...)
 }
 
 func bestVideo(formats []Format) (Format, bool) {
